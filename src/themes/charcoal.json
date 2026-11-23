@@ -1,0 +1,29 @@
+{
+  "name": "Charcoal",
+  "author": "you",
+  "themes": [
+    {
+      "is_default": true,
+      "name": "Charcoal Dark",
+      "mode": "dark",
+      "colors": {
+        "background": "#1c1c1e",
+        "foreground": "#e5e5e7",
+        "border": "#2c2c2e",
+        "muted.background": "#2c2c2e",
+        "muted.foreground": "#9a9aa0",
+        "popover.background": "#252527",
+        "popover.foreground": "#e5e5e7",
+        "secondary.background": "#2c2c2e",
+        "secondary.foreground": "#e5e5e7",
+        "accent.background": "#3a3a3c",
+        "accent.foreground": "#e5e5e7",
+        "title_bar.background": "#232325",
+        "title_bar.border": "#2c2c2e",
+        "input.border": "#3a3a3c",
+        "ring": "#6e6e73",
+        "scrollbar.thumb.background": "#48484ae6"
+      }
+    }
+  ]
+}
