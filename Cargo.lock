@@ -3588,7 +3588,10 @@ dependencies = [
 name = "markdown_viewer"
 version = "0.1.0"
 dependencies = [
+ "dirs 6.0.0",
  "gpui-kit",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

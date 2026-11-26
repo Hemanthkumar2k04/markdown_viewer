@@ -1,7 +1,9 @@
+use std::collections::VecDeque;
 use std::path::PathBuf;
 
 use gpui_kit::base::StyledExt;
 use gpui_kit::base::input::{EditorState, InputEvent};
+use gpui_kit::component::ThemeStyled;
 use gpui_kit::component::input::Editor;
 use gpui_kit::component::menu::{DropdownMenu, PopupMenuItem};
 use gpui_kit::prelude::FluentBuilder;
@@ -16,7 +18,13 @@ use gpui_kit::component::{
 
 const TITLEBAR_EXPANDED: Pixels = px(36.);
 const TITLEBAR_PEEK: Pixels = px(8.);
+const MAX_RECENT: usize = 10;
 actions!(markdown_viewer, [Save]);
+
+#[derive(Default, Clone)]
+struct RecentFiles {
+    entries: VecDeque<PathBuf>,
+}
 
 struct MarkdownViewer {
     titlebar_hovered: bool,
@@ -26,10 +34,61 @@ struct MarkdownViewer {
     _editor_subscription: Subscription,
     edit_generation: u64,
     dirty: bool,
+    history: RecentFiles,
+    config_path: PathBuf,
+}
+#[derive(serde::Serialize, serde::Deserialize)]
+struct RecentFilesFile {
+    #[serde(default)]
+    version: u32,
+    #[serde(default)]
+    files: Vec<PathBuf>,
+}
+
+impl RecentFiles {
+    fn touch(&mut self, path: PathBuf) {
+        let path = std::fs::canonicalize(&path).unwrap_or(path);
+        if let Some(pos) = self.entries.iter().position(|p| p == &path) {
+            self.entries.remove(pos);
+        }
+        self.entries.push_front(path);
+        self.entries.truncate(MAX_RECENT);
+    }
+
+    fn remove_missing(&mut self) {
+        self.entries.retain(|p| p.exists());
+    }
+    fn load(path: &std::path::Path) -> Self {
+        let Ok(text) = std::fs::read_to_string(path) else {
+            return Self::default();
+        };
+        let Ok(file) = serde_json::from_str::<RecentFilesFile>(&text) else {
+            return Self::default();
+        };
+        if file.version > 1 {
+            return Self::default();
+        };
+        let mut recent = Self {
+            entries: file.files.into(),
+        };
+        recent.remove_missing();
+        recent
+    }
+    fn save(&self, path: &std::path::Path) -> std::io::Result<()> {
+        let file = RecentFilesFile {
+            version: 1,
+            files: self.entries.iter().cloned().collect(),
+        };
+        let json = serde_json::to_string_pretty(&file).map_err(std::io::Error::other)?;
+        let tmp = path.with_extension("json.tmp");
+        std::fs::write(&tmp, json.as_bytes())?;
+        std::fs::rename(tmp, path)?;
+        Ok(())
+    }
 }
 
 impl MarkdownViewer {
-    fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+    fn new(window: &mut Window, cx: &mut Context<Self>, config_path: PathBuf) -> Self {
         let editor = cx.new(|cx| EditorState::new(window, cx));
         let _editor_subscription = cx.subscribe(&editor, |this, editor, event: &InputEvent, cx| {
             if matches!(event, InputEvent::Change) {
@@ -52,6 +111,7 @@ impl MarkdownViewer {
                 .detach();
             }
         });
+        let history = RecentFiles::load(&config_path);
         Self {
             titlebar_hovered: false,
             content: None,
@@ -60,6 +120,8 @@ impl MarkdownViewer {
             edit_generation: 0,
             dirty: false,
             file_path: None,
+            history,
+            config_path,
         }
     }
 
@@ -91,20 +153,29 @@ impl MarkdownViewer {
 
     fn load_file(&mut self, path: std::path::PathBuf, window: &mut Window, cx: &mut Context<Self>) {
         let editor = self.editor.clone();
-        self.file_path = Some(path.clone());
-        self.dirty = false;
+        let read_path = path.clone();
+
         cx.spawn_in(window, async move |this, cx| {
             let result = cx
                 .background_executor()
-                .spawn(async move { std::fs::read_to_string(path) })
+                .spawn(async move { std::fs::read_to_string(read_path) })
                 .await;
             _ = this.update_in(cx, |this, window, cx| {
-                let text: SharedString = match result {
-                    Ok(text) => text.into(),
-                    Err(err) => format!("Failed to read file: {err}").into(),
-                };
-                this.content = Some(text.clone());
-                editor.update(cx, |state, cx| state.set_value(text, window, cx));
+                match result {
+                    Ok(text) => {
+                        let text: SharedString = text.into();
+                        this.file_path = Some(path.clone());
+                        this.dirty = false;
+                        this.history.touch(path);
+                        this.persist_history(window, cx);
+                        this.content = Some(text.clone());
+                        editor.update(cx, |state, cx| state.set_value(text, window, cx));
+                    }
+                    Err(err) => {
+                        this.show_error(format!("Failed to read file: {err}"), window, cx);
+                    }
+                }
+
                 cx.notify();
             });
         })
@@ -213,7 +284,7 @@ impl MarkdownViewer {
                     div()
                         .px_2()
                         .py_1()
-                        .rounded(px(10.))
+                        .rounded_full_style(cx)
                         .border_1()
                         .when_else(
                             self.dirty,
@@ -260,18 +331,67 @@ impl MarkdownViewer {
                     div()
                         .flex()
                         .flex_col()
-                        .gap_2()
-                        .child(Label::new("Open a file to view"))
-                        .child(Button::new("open-btn").label("Choose a file").on_click(
-                            cx.listener(|this, _, window, cx| {
-                                this.pick_file(window, cx);
-                            }),
-                        )),
+                        .items_center()
+                        .gap_4()
+                        .when(!self.history.entries.is_empty(), |el| {
+                            el.child(
+                                div()
+                                    .flex()
+                                    .flex_col()
+                                    .gap_1()
+                                    .w(px(420.))
+                                    .child(Label::new("Recent files").text_sm())
+                                    .children(self.history.entries.iter().cloned().map(|path| {
+                                        let name = path
+                                            .file_name()
+                                            .map(|name| name.to_string_lossy().into_owned())
+                                            .unwrap_or_else(|| path.display().to_string());
+
+                                        Button::new(format!("recent-{}", path.display()))
+                                            .ghost()
+                                            .w_full()
+                                            .label(name)
+                                            .on_click(cx.listener(move |this, _, window, cx| {
+                                                this.load_file(path.clone(), window, cx);
+                                            }))
+                                    })),
+                            )
+                        })
+                        .child(
+                            div()
+                                .flex()
+                                .flex_col()
+                                .items_center()
+                                .gap_2()
+                                .child(Label::new("Open a file to view"))
+                                .child(Button::new("open-btn").label("Choose a file").on_click(
+                                    cx.listener(|this, _, window, cx| {
+                                        this.pick_file(window, cx);
+                                    }),
+                                )),
+                        ),
                 )
                 .into_any_element(),
         };
 
         div().flex().flex_1().w_full().min_h_0().child(content)
+    }
+    fn persist_history(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let config_path = self.config_path.clone();
+        let snapshot = self.history.clone();
+
+        cx.spawn_in(window, async move |this, cx| {
+            let result = cx
+                .background_executor()
+                .spawn(async move { snapshot.save(&config_path) })
+                .await;
+            if let Err(err) = result {
+                _ = this.update_in(cx, |this, window, cx| {
+                    this.show_error(format!("Failed to save history: {err}"), window, cx);
+                });
+            }
+        })
+        .detach();
     }
 }
 
@@ -296,6 +416,11 @@ fn main() {
     unsafe {
         std::env::set_var("ZED_DEVICE_ID", "25ac");
     }
+    let config_dir = dirs::config_dir().expect("No Config directory found");
+    let app_dir = config_dir.join("mdpane");
+    std::fs::create_dir_all(&app_dir).expect("Failed to create config directory");
+    let recent_files_path = app_dir.join("recent_files.json");
+
     application().with_assets(assets::Assets).run(|cx| {
         init(cx);
 
@@ -326,7 +451,7 @@ fn main() {
                 ..TitleBar::window_options()
             },
             cx,
-            |window, cx| cx.new(|cx| MarkdownViewer::new(window, cx)),
+            |window, cx| cx.new(|cx| MarkdownViewer::new(window, cx, recent_files_path)),
         )
         .expect("Failed to open window");
     });
