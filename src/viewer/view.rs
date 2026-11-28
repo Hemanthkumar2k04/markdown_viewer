@@ -1,10 +1,11 @@
 use gpui_kit::base::StyledExt;
-use gpui_kit::component::ThemeStyled;
 use gpui_kit::component::input::Editor;
 use gpui_kit::component::popover::Popover;
+use gpui_kit::component::select::{SearchableVec, Select, SelectEvent, SelectState};
 use gpui_kit::component::{
-    ActiveTheme, Icon, IconName, Sizable, TitleBar,
+    ActiveTheme, Icon, IconName, IndexPath, Sizable, ThemeStyled, TitleBar, WindowExt as _,
     button::{Button, ButtonVariants},
+    dialog::DialogFooter,
     h_resizable,
     label::Label,
     resizable_panel,
@@ -13,9 +14,21 @@ use gpui_kit::component::{
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 
+use crate::config::{DEFAULT_EDITOR_FONT_SIZE, MAX_EDITOR_FONT_SIZE, MIN_EDITOR_FONT_SIZE};
+
 use super::{MarkdownViewer, Save};
 
 const GEAR_ICON: &[u8] = include_bytes!("../icons/gear.svg");
+const HOME_ICON: &[u8] = include_bytes!("../icons/home.svg");
+
+fn is_safe_external_url(url: &str) -> bool {
+    let url = url.trim();
+    url.get(..8)
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case("https://"))
+        || url
+            .get(..7)
+            .is_some_and(|prefix| prefix.eq_ignore_ascii_case("http://"))
+}
 
 impl MarkdownViewer {
     fn render_titlebar(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
@@ -25,68 +38,97 @@ impl MarkdownViewer {
             .relative()
             .w_full()
             .child(
-                TitleBar::new().child(
-                    Popover::new("burger-menu")
-                        .anchor(Anchor::TopLeft)
-                        .p_1p5()
-                        .trigger(
-                            Button::new("burger")
-                                .ghost()
-                                .small()
-                                .icon(IconName::Menu)
-                                .tooltip("Menu"),
-                        )
-                        .content(move |_, _, cx| {
-                            let weak_this = weak_this.clone();
-                            let popover = cx.weak_entity();
-                            let popover_opt = popover.clone();
+                TitleBar::new().h(px(44.)).child(
+                    div()
+                        .h_flex()
+                        .items_center()
+                        .gap_2()
+                        .child(
+                            Popover::new("burger-menu")
+                                .anchor(Anchor::TopLeft)
+                                .p_1p5()
+                                .trigger(
+                                    Button::new("burger")
+                                        .ghost()
+                                        .icon(IconName::Menu)
+                                        .tooltip("Menu"),
+                                )
+                                .content(move |_, _, cx| {
+                                    let weak_this_file = weak_this.clone();
+                                    let weak_this_cfg = weak_this.clone();
+                                    let popover = cx.weak_entity();
+                                    let popover_cfg = popover.clone();
 
-                            div()
-                                .v_flex()
-                                .gap(px(5.))
-                                .min_w(px(140.))
-                                .child(
-                                    Button::new("menu-file")
-                                        .ghost()
-                                        .w_full()
+                                    div()
+                                        .v_flex()
+                                        .gap(px(5.))
+                                        .min_w(px(140.))
                                         .child(
-                                            div()
-                                                .h_flex()
+                                            Button::new("menu-file")
+                                                .ghost()
                                                 .w_full()
-                                                .items_center()
-                                                .justify_start()
-                                                .gap_2()
-                                                .child(Icon::new(IconName::File).size_4())
-                                                .child(Label::new("File").text_base()),
+                                                .child(
+                                                    div()
+                                                        .h_flex()
+                                                        .w_full()
+                                                        .items_center()
+                                                        .justify_start()
+                                                        .gap_2()
+                                                        .child(Icon::new(IconName::File).size_4())
+                                                        .child(Label::new("File").text_base()),
+                                                )
+                                                .on_click(move |_, window, cx| {
+                                                    _ = popover.update(cx, |state, cx| {
+                                                        state.dismiss(window, cx)
+                                                    });
+                                                    _ = weak_this_file.update(cx, |this, cx| {
+                                                        this.pick_file(window, cx);
+                                                    });
+                                                }),
                                         )
-                                        .on_click(move |_, window, cx| {
-                                            _ = popover
-                                                .update(cx, |state, cx| state.dismiss(window, cx));
-                                            _ = weak_this.update(cx, |this, cx| {
-                                                this.pick_file(window, cx);
-                                            });
-                                        }),
-                                )
-                                .child(
-                                    Button::new("menu-options")
-                                        .ghost()
-                                        .w_full()
                                         .child(
-                                            div()
-                                                .h_flex()
+                                            Button::new("menu-config")
+                                                .ghost()
                                                 .w_full()
-                                                .items_center()
-                                                .justify_start()
-                                                .gap_2()
-                                                .child(Icon::empty().data(GEAR_ICON).size_4())
-                                                .child(Label::new("Options").text_base()),
+                                                .child(
+                                                    div()
+                                                        .h_flex()
+                                                        .w_full()
+                                                        .items_center()
+                                                        .justify_start()
+                                                        .gap_2()
+                                                        .child(
+                                                            Icon::empty().data(GEAR_ICON).size_4(),
+                                                        )
+                                                        .child(Label::new("Config").text_base()),
+                                                )
+                                                .on_click(move |_, window, cx| {
+                                                    _ = popover_cfg.update(cx, |state, cx| {
+                                                        state.dismiss(window, cx)
+                                                    });
+                                                    _ = weak_this_cfg.update(cx, |this, cx| {
+                                                        this.open_config_dialog(window, cx);
+                                                    });
+                                                }),
                                         )
-                                        .on_click(move |_, window, cx| {
-                                            _ = popover_opt
-                                                .update(cx, |state, cx| state.dismiss(window, cx));
-                                        }),
-                                )
-                        }),
+                                }),
+                        )
+                        .child(
+                            div().child(
+                                Button::new("home-btn")
+                                    .tooltip("Home")
+                                    .icon(Icon::empty().data(HOME_ICON).large())
+                                    .ghost()
+                                    .on_click(cx.listener(|this, _, _window, cx| {
+                                        this.file_generation = this.file_generation.wrapping_add(1);
+                                        this.edit_generation = this.edit_generation.wrapping_add(1);
+                                        this.content = None;
+                                        this.file_path = None;
+                                        this.dirty = false;
+                                        cx.notify();
+                                    })),
+                            ),
+                        ),
                 ),
             )
             .child(
@@ -104,15 +146,27 @@ impl MarkdownViewer {
         let content = match &self.content {
             Some(content) => h_resizable("editor-preview-split")
                 .child(
-                    resizable_panel()
-                        .size_range(px(200.)..Pixels::MAX) // optional, defaults to 100px min
-                        .child(Editor::new(&self.editor).h(relative(1.)).bordered(false)),
-                )
-                .child(resizable_panel().size_range(px(200.)..Pixels::MAX).child(
-                    div().size_full().p_4().child(
-                        TextView::markdown("markdown-content", content.clone()).scrollable(true),
+                    resizable_panel().size_range(px(200.)..Pixels::MAX).child(
+                        Editor::new(&self.editor)
+                            .h(relative(1.))
+                            .bordered(false)
+                            .font_family(SharedString::from(self.config.editor.font_family.clone()))
+                            .text_size(px(self.config.editor.font_size)),
                     ),
-                ))
+                )
+                .child(
+                    resizable_panel().size_range(px(200.)..Pixels::MAX).child(
+                        div().size_full().p_4().child(
+                            TextView::markdown("markdown-content", content.clone())
+                                .scrollable(true)
+                                .on_link_click(|url, _, _, cx| {
+                                    if is_safe_external_url(url.as_ref()) {
+                                        cx.open_url(url);
+                                    }
+                                }),
+                        ),
+                    ),
+                )
                 .into_any_element(),
 
             None => div()
@@ -135,7 +189,7 @@ impl MarkdownViewer {
                             .p_10()
                             .child(Label::new("Recent files").text_2xl())
                             .child(div().flex().flex_col().gap_5().children(
-                                self.history.entries.iter().cloned().map(|path| {
+                                self.history.entries.iter().map(|path| {
                                     let name = path
                                         .file_name()
                                         .map(|name| name.to_string_lossy().into_owned())
@@ -261,6 +315,150 @@ impl MarkdownViewer {
                         }),
                 )
             }))
+    }
+
+    fn open_config_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let mut fonts: Vec<SharedString> = cx
+            .text_system()
+            .all_font_names()
+            .into_iter()
+            .map(SharedString::from)
+            .collect();
+        fonts.sort();
+        fonts.dedup();
+
+        let selected = fonts
+            .iter()
+            .position(|f| f.as_ref() == self.config.editor.font_family)
+            .map(IndexPath::new);
+
+        let font_select = cx.new(|cx| {
+            SelectState::new(SearchableVec::new(fonts), selected, window, cx).searchable(true)
+        });
+
+        self.font_select_subscription = Some(cx.subscribe(
+            &font_select,
+            |this, _, event: &SelectEvent<SearchableVec<SharedString>>, cx| {
+                if let SelectEvent::Confirm(Some(family)) = event {
+                    this.config.editor.font_family = family.to_string();
+                    this.persist_config(cx);
+                    cx.notify();
+                }
+            },
+        ));
+
+        let weak_this = cx.weak_entity();
+
+        window.open_dialog(cx, move |dialog, _window, cx| {
+            let (current_family, current_size) = weak_this
+                .upgrade()
+                .map(|viewer| {
+                    let editor = &viewer.read(cx).config.editor;
+                    (editor.font_family.clone(), editor.font_size)
+                })
+                .unwrap_or_else(|| ("JetBrains Mono".to_string(), DEFAULT_EDITOR_FONT_SIZE));
+
+            let weak_dec = weak_this.clone();
+            let weak_inc = weak_this.clone();
+
+            dialog
+                .title("Config")
+                .centered()
+                .w(px(480.))
+                .child(
+                    div()
+                        .v_flex()
+                        .gap_4()
+                        .py_2()
+                        .child(
+                            div()
+                                .v_flex()
+                                .gap_2()
+                                .child(
+                                    Label::new("Editor")
+                                        .text_sm()
+                                        .text_color(cx.theme().muted_foreground),
+                                )
+                                .child(div().w_full().h(px(1.)).bg(cx.theme().border)),
+                        )
+                        .child(
+                            div()
+                                .h_flex()
+                                .w_full()
+                                .items_center()
+                                .justify_between()
+                                .gap_4()
+                                .child(Label::new("Font Family"))
+                                .child(
+                                    div().w(px(240.)).child(
+                                        Select::new(&font_select)
+                                            .placeholder(current_family)
+                                            .menu_max_h(px(260.)),
+                                    ),
+                                ),
+                        )
+                        .child(
+                            div()
+                                .h_flex()
+                                .w_full()
+                                .items_center()
+                                .justify_between()
+                                .gap_4()
+                                .child(Label::new("Font Size"))
+                                .child(
+                                    div()
+                                        .h_flex()
+                                        .items_center()
+                                        .gap_2()
+                                        .child(
+                                            Button::new("editor-font-size-dec")
+                                                .small()
+                                                .label("-")
+                                                .on_click(move |_, _, cx| {
+                                                    _ = weak_dec.update(cx, |this, cx| {
+                                                        this.config.editor.font_size =
+                                                            (this.config.editor.font_size - 1.0)
+                                                                .max(MIN_EDITOR_FONT_SIZE);
+                                                        this.persist_config(cx);
+                                                        cx.notify();
+                                                    });
+                                                }),
+                                        )
+                                        .child(div().min_w(px(56.)).flex().justify_center().child(
+                                            Label::new(format!(
+                                                "{} px",
+                                                current_size.round() as u32
+                                            )),
+                                        ))
+                                        .child(
+                                            Button::new("editor-font-size-inc")
+                                                .small()
+                                                .label("+")
+                                                .on_click(move |_, _, cx| {
+                                                    _ = weak_inc.update(cx, |this, cx| {
+                                                        this.config.editor.font_size =
+                                                            (this.config.editor.font_size + 1.0)
+                                                                .min(MAX_EDITOR_FONT_SIZE);
+                                                        this.persist_config(cx);
+                                                        cx.notify();
+                                                    });
+                                                }),
+                                        ),
+                                ),
+                        ),
+                )
+                .footer(
+                    DialogFooter::new().child(
+                        Button::new("config-done")
+                            .secondary()
+                            .bg(black())
+                            .label("Done")
+                            .on_click(|_, window, cx| {
+                                window.close_dialog(cx);
+                            }),
+                    ),
+                )
+        });
     }
 }
 

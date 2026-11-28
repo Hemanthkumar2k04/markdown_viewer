@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=MDpane
+Comment=A fast Markdown editor and live preview pane
+Exec=mdpane %F
+Icon=mdpane
+Terminal=false
+Categories=Utility;TextEditor;
+MimeType=text/markdown;
+StartupWMClass=mdpane

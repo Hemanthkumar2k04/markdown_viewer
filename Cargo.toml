@@ -1,10 +1,55 @@
 [package]
-name = "markdown_viewer"
+authors = ["Hemanthkumar K <hemanthkumar2k04@gmail.com>"]
+name = "mdpane"
 version = "0.1.0"
 edition = "2024"
+description = "A Fast Markdown editor and live preview pane"
+readme = "README.md"
+repository = "https://github.com/Hemanthkumar2k04/MDpane"
+license = "MIT"
+keywords = ["markdown", "editor", "preview", "gpui"]
+categories = ["text-editors"]
 
 [dependencies]
 gpui-kit = "0.10.0"
-serde = {version="1", features=["derive"]}
-serde_json="1"
-dirs="6"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+dirs = "6"
+
+[profile.release]
+lto = "thin"
+strip = true
+codegen-units = 1
+
+[target.'cfg(windows)'.build-dependencies]
+winresource = "0.1"
+
+[package.metadata.packager]
+productName = "MDpane"
+longDescription = "A fast Markdown editor and live preview pane with synchronized editing."
+identifier = "io.github.mdpane"
+category = "Utility"
+outDir = "./dist"
+beforePackagingCommand = "cargo build --release"
+icons = [
+  "assets/icons/32x32.png",
+  "assets/icons/128x128.png",
+  "assets/icons/256x256.png",
+  "assets/icons/512x512.png",
+  "assets/icon.png",
+  "assets/icon.ico",
+]
+binaries = [{ path = "mdpane", main = true }]
+
+[package.metadata.packager.deb]
+packageName = "mdpane"
+
+[[package.metadata.packager.fileAssociations]]
+extensions = ["md", "markdown"]
+mimeType = "text/markdown"
+name = "Markdown Document"
+description = "Markdown Document"
+role = "editor"
+
+[package.metadata.packager.nsis]
+installerIcon = "assets/icon.ico"
