@@ -70,6 +70,7 @@ jobs:
             libfuse2
 
       - name: Install cargo-packager
+        shell: bash
         run: |
           if ! command -v cargo-packager >/dev/null 2>&1; then
             cargo install cargo-packager --version 0.11.8 --locked
@@ -78,7 +79,7 @@ jobs:
       - name: Package application
         env:
           APPIMAGE_EXTRACT_AND_RUN: "1"
-        run: cargo packager --release --formats ${{ matrix.formats }} --out-dir ${{ github.workspace }}/dist
+        run: cargo packager --release --formats ${{ matrix.formats }} --out-dir "${{ github.workspace }}/dist"
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
