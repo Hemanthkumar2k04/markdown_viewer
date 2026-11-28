@@ -36,7 +36,7 @@ icons = [
   "assets/icons/128x128.png",
   "assets/icons/256x256.png",
   "assets/icons/512x512.png",
-  "assets/icon.png",
+  "assets/icons/512x512@2x.png",
   "assets/icon.ico",
 ]
 binaries = [{ path = "mdpane", main = true }]
